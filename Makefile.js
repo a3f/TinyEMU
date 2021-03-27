@@ -41,9 +41,10 @@ JS_OBJS=jsemu.js.o softfp.js.o virtio.js.o fs.js.o fs_net.js.o fs_wget.js.o fs_u
 JS_OBJS+=iomem.js.o cutils.js.o aes.js.o sha256.js.o
 
 ifdef CONFIG_SDL
-JS_LIBS+=-lSDL
+JS_LIBS+=-lSDL2
 JS_OBJS+=sdl.js.o
-EMCFLAGS+=-DCONFIG_SDL
+EMCFLAGS+=-DCONFIG_SDL -s USE_SDL=2
+EMLDFLAGS+=-s USE_SDL=2
 endif
 
 RISCVEMU64_OBJS=$(JS_OBJS) riscv_cpu64.js.o riscv_machine.js.o machine.js.o

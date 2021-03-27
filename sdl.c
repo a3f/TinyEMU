@@ -30,19 +30,22 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include <SDL/SDL.h>
+#include <SDL2/SDL.h>
 
+#include "sdl2-keymap.h"
 #include "cutils.h"
 #include "virtio.h"
 #include "machine.h"
 
-#define KEYCODE_MAX 127
-
-static SDL_Surface *screen;
 static SDL_Surface *fb_surface;
 static int screen_width, screen_height, fb_width, fb_height, fb_stride;
 static SDL_Cursor *sdl_cursor_hidden;
-static uint8_t key_pressed[KEYCODE_MAX + 1];
+static uint8_t key_pressed[NR_KEYS];
+
+static SDL_Window *window;
+static SDL_Texture *texture;
+static SDL_Renderer *renderer;
+
 
 static void sdl_update_fb_surface(FBDevice *fb_dev)
 {
@@ -68,20 +71,38 @@ static void sdl_update_fb_surface(FBDevice *fb_dev)
             fprintf(stderr, "Could not create SDL framebuffer surface\n");
             exit(1);
         }
+
+	renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+	if (!renderer) {
+		fprintf(stderr, "Could not create renderer - exiting\n");
+		exit(1);
+	}
+
+	texture = SDL_CreateTextureFromSurface(renderer, fb_surface);
+	if (!texture) {
+		fprintf(stderr, "Could not create texture - exiting\n");
+		exit(1);
+	}
+
     }
 }
 
 static void sdl_update(FBDevice *fb_dev, void *opaque,
                        int x, int y, int w, int h)
 {
+    unsigned char *start;
     SDL_Rect r;
     //    printf("sdl_update: %d %d %d %d\n", x, y, w, h);
     r.x = x;
     r.y = y;
     r.w = w;
     r.h = h;
-    SDL_BlitSurface(fb_surface, &r, screen, &r);
-    SDL_UpdateRect(screen, r.x, r.y, r.w, r.h);
+
+    start = fb_surface->pixels + fb_surface->pitch * y + x;
+
+    SDL_UpdateTexture(texture, &r, start, fb_surface->pitch);
+    SDL_RenderCopy(renderer, texture, NULL, NULL);
+    SDL_RenderPresent(renderer);
 }
 
 #if defined(_WIN32)
@@ -96,16 +117,11 @@ static int sdl_get_keycode(const SDL_KeyboardEvent *ev)
 /* we assume Xorg is used with a PC keyboard. Return 0 if no keycode found. */
 static int sdl_get_keycode(const SDL_KeyboardEvent *ev)
 {
-    int keycode;
-    keycode = ev->keysym.scancode;
-    if (keycode < 9) {
-        keycode = 0;
-    } else if (keycode < 127 + 8) {
-        keycode -= 8;
-    } else {
-        keycode = 0;
-    }
-    return keycode;
+    int scancode = ev->keysym.scancode;
+    if (scancode < NR_KEYS)
+	    return keymap[scancode];
+
+    return 0;
 }
 
 #endif
@@ -115,7 +131,7 @@ static void sdl_reset_keys(VirtMachine *m)
 {
     int i;
     
-    for(i = 1; i <= KEYCODE_MAX; i++) {
+    for(i = 1; i < NR_KEYS; i++) {
         if (key_pressed[i]) {
             vm_send_key_event(m, FALSE, i);
             key_pressed[i] = FALSE;
@@ -135,7 +151,7 @@ static void sdl_handle_key_event(const SDL_KeyboardEvent *ev, VirtMachine *m)
             vm_send_key_event(m, FALSE, keycode);
         } else {
             keypress = (ev->type == SDL_KEYDOWN);
-            if (keycode <= KEYCODE_MAX)
+            if (keycode < NR_KEYS)
                 key_pressed[keycode] = keypress;
             vm_send_key_event(m, keypress, keycode);
         }
@@ -182,35 +198,6 @@ static void sdl_handle_mouse_motion_event(const SDL_Event *ev, VirtMachine *m)
     sdl_send_mouse_event(m, x, y, 0, ev->motion.state, is_absolute);
 }
 
-static void sdl_handle_mouse_button_event(const SDL_Event *ev, VirtMachine *m)
-{
-    BOOL is_absolute = vm_mouse_is_absolute(m);
-    int state, dz;
-
-    dz = 0;
-    if (ev->type == SDL_MOUSEBUTTONDOWN) {
-        if (ev->button.button == SDL_BUTTON_WHEELUP) {
-            dz = 1;
-        } else if (ev->button.button == SDL_BUTTON_WHEELDOWN) {
-            dz = -1;
-        }
-    }
-    
-    state = SDL_GetMouseState(NULL, NULL);
-    /* just in case */
-    if (ev->type == SDL_MOUSEBUTTONDOWN)
-        state |= SDL_BUTTON(ev->button.button);
-    else
-        state &= ~SDL_BUTTON(ev->button.button);
-
-    if (is_absolute) {
-        sdl_send_mouse_event(m, ev->button.x, ev->button.y,
-                             dz, state, is_absolute);
-    } else {
-        sdl_send_mouse_event(m, 0, 0, dz, state, is_absolute);
-    }
-}
-
 void sdl_refresh(VirtMachine *m)
 {
     SDL_Event ev_s, *ev = &ev_s;
@@ -233,7 +220,6 @@ void sdl_refresh(VirtMachine *m)
             break;
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
-            sdl_handle_mouse_button_event(ev, m);
             break;
         case SDL_QUIT:
             exit(0);
@@ -251,8 +237,6 @@ static void sdl_hide_cursor(void)
 
 void sdl_init(int width, int height)
 {
-    int flags;
-    
     screen_width = width;
     screen_height = height;
 
@@ -261,14 +245,12 @@ void sdl_init(int width, int height)
         exit(1);
     }
 
-    flags = SDL_HWSURFACE | SDL_ASYNCBLIT | SDL_HWACCEL;
-    screen = SDL_SetVideoMode(width, height, 0, flags);
-    if (!screen || !screen->pixels) {
-        fprintf(stderr, "Could not open SDL display\n");
-        exit(1);
+    window = SDL_CreateWindow("TinyEMU", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+			      width, height, 0);
+    if (!window) {
+	    fprintf(stderr, "Could not open SDL display\n");
+	    exit(1);
     }
-
-    SDL_WM_SetCaption("TinyEMU", "TinyEMU");
 
     sdl_hide_cursor();
 }
