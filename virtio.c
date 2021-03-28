@@ -116,6 +116,13 @@ typedef struct {
     uint16_t next;
 } VIRTIODesc;
 
+#define VIRTIO_INPUT_EV_SYN 0x00
+#define VIRTIO_INPUT_EV_KEY 0x01
+#define VIRTIO_INPUT_EV_REL 0x02
+#define VIRTIO_INPUT_EV_ABS 0x03
+#define VIRTIO_INPUT_EV_SND 0x12
+#define VIRTIO_INPUT_EV_REP 0x14
+
 /* return < 0 to stop the notification (it must be manually restarted
    later), 0 if OK */
 typedef int VIRTIODeviceRecvFunc(VIRTIODevice *s1, int queue_idx,
@@ -1372,12 +1379,6 @@ enum {
     VIRTIO_INPUT_CFG_ABS_INFO   = 0x12,
 };
 
-#define VIRTIO_INPUT_EV_SYN 0x00
-#define VIRTIO_INPUT_EV_KEY 0x01
-#define VIRTIO_INPUT_EV_REL 0x02
-#define VIRTIO_INPUT_EV_ABS 0x03
-#define VIRTIO_INPUT_EV_REP 0x14
-
 #define BTN_LEFT         0x110
 #define BTN_RIGHT        0x111
 #define BTN_MIDDLE       0x112
@@ -1403,13 +1404,37 @@ static const uint16_t buttons_list[] = {
     BTN_LEFT, BTN_RIGHT, BTN_MIDDLE
 };
 
+#define SND_BELL		0x01
+#define SND_TONE		0x02
+
+void beep(int freq);
+
 static int virtio_input_recv_request(VIRTIODevice *s, int queue_idx,
                                       int desc_idx, int read_size,
                                       int write_size)
 {
+    uint8_t buf[8];
+    uint16_t type, code;
+    uint32_t value;
+
     if (queue_idx == 1) {
         /* led & keyboard updates */
         //        printf("%s: write_size=%d\n", __func__, write_size);
+
+	    if (memcpy_from_queue(s, buf, queue_idx, desc_idx, 0, sizeof(buf)) == 0) {
+		    type = get_le16(buf);
+		    code = get_le16(buf + 2);
+		    value = get_le16(buf + 4);
+		    if (type == VIRTIO_INPUT_EV_SND) {
+			    if (code == SND_BELL) {
+				    value = value ? 1000 : 0;
+				    code = SND_TONE;
+			    }
+
+			    if (code == SND_TONE)
+				    beep(value);
+		    }
+	    }
         virtio_consume_desc(s, queue_idx, desc_idx, 0);
     }
     return 0;
@@ -1563,6 +1588,9 @@ static void virtio_input_config_write(VIRTIODevice *s)
             case VIRTIO_INPUT_EV_REP: /* allow key repetition */
                 config[2] = 1;
                 break;
+	    case VIRTIO_INPUT_EV_SND:
+		config[2] = (1 << SND_BELL) | (1 << SND_TONE);
+		break;
             default:
                 break;
             }
