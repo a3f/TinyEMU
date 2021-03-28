@@ -346,4 +346,3 @@ void virt_machine_run(void *opaque)
         emscripten_async_call(virt_machine_run, m, MAX_SLEEP_TIME);
     }
 }
-

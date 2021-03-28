@@ -29,6 +29,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <math.h>
 
 #include <SDL2/SDL.h>
 
@@ -36,6 +37,9 @@
 #include "cutils.h"
 #include "virtio.h"
 #include "machine.h"
+
+#define AMPLITUDE 8000
+#define SAMPLERATE 44100
 
 static SDL_Surface *fb_surface;
 static int screen_width, screen_height, fb_width, fb_height, fb_stride;
@@ -235,12 +239,57 @@ static void sdl_hide_cursor(void)
     SDL_SetCursor(sdl_cursor_hidden);
 }
 
+static int beepfreq;
+
+void beep(int freq)
+{
+	SDL_LockAudio();
+	beepfreq = freq;
+	SDL_UnlockAudio();
+}
+
+static SDL_AudioSpec have;
+
+void audio_callback(void *_beeper, uint8_t *_stream, int _length)
+{
+    static double v;
+    Sint16 *stream = (void*) _stream;
+    int length = _length / sizeof(*stream);
+
+    for (int i = 0; i < length; i++) {
+	    stream[i] = AMPLITUDE * sin(v * 2 * M_PI / have.freq);
+	    v += beepfreq;
+    }
+}
+
+static SDL_AudioDeviceID dev;
+
+int sdl_sound_init(unsigned sample_rate)
+{
+	SDL_AudioSpec audiospec = {
+		.freq = sample_rate,
+		.format = AUDIO_S16,
+		.channels = 1,
+		.samples = 4096,
+		.callback = audio_callback,
+	};
+
+	dev = SDL_OpenAudioDevice(NULL, 0, &audiospec, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+	if (!dev) {
+		fprintf(stderr, "initialize open audio device\n");
+		exit(1);
+	}
+
+	SDL_PauseAudioDevice(dev, 0);
+	return 0;
+}
+
 void sdl_init(int width, int height)
 {
     screen_width = width;
     screen_height = height;
 
-    if (SDL_Init (SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE)) {
+    if (SDL_Init (SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_NOPARACHUTE)) {
         fprintf(stderr, "Could not initialize SDL - exiting\n");
         exit(1);
     }
@@ -253,5 +302,7 @@ void sdl_init(int width, int height)
     }
 
     sdl_hide_cursor();
+
+    sdl_sound_init(SAMPLERATE);
 }
 
