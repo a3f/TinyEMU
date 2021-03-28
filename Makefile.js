@@ -22,6 +22,9 @@
 # THE SOFTWARE.
 #
 
+# SDL support (optional)
+CONFIG_SDL=y
+
 # Build the Javascript version of TinyEMU
 EMCC=emcc
 EMCFLAGS=-O2 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -MMD -fno-strict-aliasing -DCONFIG_FS_NET
@@ -36,6 +39,12 @@ all: $(PROGS)
 
 JS_OBJS=jsemu.js.o softfp.js.o virtio.js.o fs.js.o fs_net.js.o fs_wget.js.o fs_utils.js.o simplefb.js.o pci.js.o json.js.o block_net.js.o
 JS_OBJS+=iomem.js.o cutils.js.o aes.js.o sha256.js.o
+
+ifdef CONFIG_SDL
+JS_LIBS+=-lSDL
+JS_OBJS+=sdl.js.o
+EMCFLAGS+=-DCONFIG_SDL
+endif
 
 RISCVEMU64_OBJS=$(JS_OBJS) riscv_cpu64.js.o riscv_machine.js.o machine.js.o
 RISCVEMU32_OBJS=$(JS_OBJS) riscv_cpu32.js.o riscv_machine.js.o machine.js.o
