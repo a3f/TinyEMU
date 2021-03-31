@@ -346,3 +346,41 @@ void virt_machine_run(void *opaque)
         emscripten_async_call(virt_machine_run, m, MAX_SLEEP_TIME);
     }
 }
+
+void beep(int beepfreq)
+{
+	static int init;
+	if (!init) {
+		EM_ASM({
+			audioCtx = new (window.AudioContext || window.webkitAudioContext || window.audioContext);
+			gainNode = audioCtx.createGain();
+			old_oscillator = null;
+		});
+		init = 1;
+	}
+	EM_ASM({ function beep(freq) {
+		try {
+			if (old_oscillator !== null) {
+				old_oscillator.stop();
+				old_oscillator = null;
+			}
+
+			if (freq) {
+				oscillator = audioCtx.createOscillator();
+				oscillator.connect(gainNode);
+				gainNode.connect(audioCtx.destination);
+				gainNode.gain.value = 0.125;
+				oscillator.type = "square";
+
+				oscillator.frequency.value = freq;
+				oscillator.start();
+				old_oscillator = oscillator;
+			}
+
+		} catch (error) {
+			console.error(error);
+		}
+	}
+	beep($0);
+	}, beepfreq);
+}
