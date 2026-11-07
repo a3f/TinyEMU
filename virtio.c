@@ -1424,7 +1424,7 @@ static int virtio_input_recv_request(VIRTIODevice *s, int queue_idx,
 	    if (memcpy_from_queue(s, buf, queue_idx, desc_idx, 0, sizeof(buf)) == 0) {
 		    type = get_le16(buf);
 		    code = get_le16(buf + 2);
-		    value = get_le16(buf + 4);
+		    value = get_le32(buf + 4);
 		    if (type == VIRTIO_INPUT_EV_SND) {
 			    if (code == SND_BELL) {
 				    value = value ? 1000 : 0;
@@ -1589,7 +1589,8 @@ static void virtio_input_config_write(VIRTIODevice *s)
                 config[2] = 1;
                 break;
 	    case VIRTIO_INPUT_EV_SND:
-		config[2] = (1 << SND_BELL) | (1 << SND_TONE);
+		config[2] = 1;
+		config[8] = (1 << SND_BELL) | (1 << SND_TONE);
 		break;
             default:
                 break;
