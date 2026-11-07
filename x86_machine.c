@@ -2128,9 +2128,11 @@ static VirtMachine *pc_machine_init(const VirtMachineParams *p)
 
     if (p->input_device) {
         if (!strcmp(p->input_device, "virtio")) {
-            s->keyboard_dev = virtio_input_init(vbus, VIRTIO_INPUT_TYPE_KEYBOARD);
+            s->keyboard_dev = virtio_input_init(vbus, VIRTIO_INPUT_TYPE_KEYBOARD,
+                                                p->beeper);
             
-            s->mouse_dev = virtio_input_init(vbus, VIRTIO_INPUT_TYPE_TABLET);
+            s->mouse_dev = virtio_input_init(vbus, VIRTIO_INPUT_TYPE_TABLET,
+                                             NULL);
         } else if (!strcmp(p->input_device, "ps2")) {
             s->kbd_state = i8042_init(&s->ps2_kbd, &s->ps2_mouse,
                                       s->port_map,

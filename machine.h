@@ -92,6 +92,7 @@ typedef struct {
     char *display_device; /* NULL means no display */
     int width, height; /* graphic width & height */
     CharacterDevice *console;
+    BeeperDevice *beeper; /* NULL means no beeper */
     VMDriveEntry tab_drive[MAX_DRIVE_DEVICE];
     int drive_count;
     VMFSEntry tab_fs[MAX_FS_DEVICE];
@@ -173,6 +174,7 @@ static inline void vm_send_key_event(VirtMachine *s1, BOOL is_down, uint16_t key
 /* gui */
 void sdl_refresh(VirtMachine *m);
 void sdl_init(int width, int height);
+BeeperDevice *sdl_beeper_init(void);
 
 /* simplefb.c */
 typedef struct SimpleFBState SimpleFBState;

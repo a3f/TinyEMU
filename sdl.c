@@ -239,51 +239,58 @@ static void sdl_hide_cursor(void)
     SDL_SetCursor(sdl_cursor_hidden);
 }
 
-static int beepfreq;
+static SDL_AudioDeviceID audio_dev;
+static SDL_AudioSpec audio_spec;
+static int beep_freq; /* protected by the audio device lock */
 
-#ifndef EMSCRIPTEN
-void beep(int freq)
+static void sdl_audio_callback(void *opaque, uint8_t *stream1, int len)
 {
-	SDL_LockAudio();
-	beepfreq = freq;
-	SDL_UnlockAudio();
-}
-#endif
+    static double phase;
+    Sint16 *stream = (Sint16 *)stream1;
+    int i;
 
-static SDL_AudioSpec have;
-
-void audio_callback(void *_beeper, uint8_t *_stream, int _length)
-{
-    static double v;
-    Sint16 *stream = (void*) _stream;
-    int length = _length / sizeof(*stream);
-
-    for (int i = 0; i < length; i++) {
-	    stream[i] = AMPLITUDE * sin(v * 2 * M_PI / have.freq);
-	    v += beepfreq;
+    len /= sizeof(*stream);
+    for(i = 0; i < len; i++) {
+        stream[i] = beep_freq ? AMPLITUDE * sin(2 * M_PI * phase) : 0;
+        phase += (double)beep_freq / audio_spec.freq;
+        phase -= floor(phase);
     }
 }
 
-static SDL_AudioDeviceID dev;
-
-int sdl_sound_init(unsigned sample_rate)
+static void sdl_beeper_set_tone(void *opaque, int freq)
 {
-	SDL_AudioSpec audiospec = {
-		.freq = sample_rate,
-		.format = AUDIO_S16,
-		.channels = 1,
-		.samples = 4096,
-		.callback = audio_callback,
-	};
+    SDL_LockAudioDevice(audio_dev);
+    beep_freq = freq;
+    SDL_UnlockAudioDevice(audio_dev);
+}
 
-	dev = SDL_OpenAudioDevice(NULL, 0, &audiospec, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
-	if (!dev) {
-		fprintf(stderr, "initialize open audio device\n");
-		exit(1);
-	}
+static BeeperDevice sdl_beeper = {
+    .set_tone = sdl_beeper_set_tone,
+};
 
-	SDL_PauseAudioDevice(dev, 0);
-	return 0;
+/* return NULL if there is no audio output */
+BeeperDevice *sdl_beeper_init(void)
+{
+    SDL_AudioSpec want = {
+        .freq = SAMPLERATE,
+        .format = AUDIO_S16SYS,
+        .channels = 1,
+        .samples = 4096,
+        .callback = sdl_audio_callback,
+    };
+
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+        fprintf(stderr, "Could not initialize SDL audio: %s\n", SDL_GetError());
+        return NULL;
+    }
+    audio_dev = SDL_OpenAudioDevice(NULL, 0, &want, &audio_spec,
+                                    SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+    if (!audio_dev) {
+        fprintf(stderr, "Could not open audio device: %s\n", SDL_GetError());
+        return NULL;
+    }
+    SDL_PauseAudioDevice(audio_dev, 0);
+    return &sdl_beeper;
 }
 
 void sdl_init(int width, int height)
@@ -291,7 +298,7 @@ void sdl_init(int width, int height)
     screen_width = width;
     screen_height = height;
 
-    if (SDL_Init (SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_NOPARACHUTE)) {
+    if (SDL_Init (SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE)) {
         fprintf(stderr, "Could not initialize SDL - exiting\n");
         exit(1);
     }
@@ -304,9 +311,5 @@ void sdl_init(int width, int height)
     }
 
     sdl_hide_cursor();
-
-#ifndef EMSCRIPTEN
-    sdl_sound_init(SAMPLERATE);
-#endif
 }
 

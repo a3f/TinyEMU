@@ -948,14 +948,15 @@ static VirtMachine *riscv_machine_init(const VirtMachineParams *p)
         if (!strcmp(p->input_device, "virtio")) {
             vbus->irq = &s->plic_irq[irq_num];
             s->keyboard_dev = virtio_input_init(vbus,
-                                                VIRTIO_INPUT_TYPE_KEYBOARD);
+                                                VIRTIO_INPUT_TYPE_KEYBOARD,
+                                                p->beeper);
             vbus->addr += VIRTIO_SIZE;
             irq_num++;
             s->virtio_count++;
 
             vbus->irq = &s->plic_irq[irq_num];
             s->mouse_dev = virtio_input_init(vbus,
-                                             VIRTIO_INPUT_TYPE_TABLET);
+                                             VIRTIO_INPUT_TYPE_TABLET, NULL);
             vbus->addr += VIRTIO_SIZE;
             irq_num++;
             s->virtio_count++;

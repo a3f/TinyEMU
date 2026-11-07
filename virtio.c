@@ -155,6 +155,8 @@ struct VIRTIODevice {
     VIRTIODeviceRecvFunc *device_recv;
     void (*config_write)(VIRTIODevice *s); /* called after the config
                                               is written */
+    void (*reset)(VIRTIODevice *s); /* called when the driver resets
+                                       the device, may be NULL */
     uint32_t config_space_size; /* in bytes, must be multiple of 4 */
     uint8_t config_space[MAX_CONFIG_SPACE_SIZE];
 };
@@ -183,6 +185,8 @@ static void virtio_reset(VIRTIODevice *s)
         qs->used_addr = 0;
         qs->last_avail_idx = 0;
     }
+    if (s->reset)
+        s->reset(s);
 }
 
 static uint8_t *virtio_pci_get_ram_ptr(VIRTIODevice *s, virtio_phys_addr_t paddr, BOOL is_rw)
@@ -1398,43 +1402,65 @@ typedef struct VIRTIOInputDevice {
     VIRTIODevice common;
     VirtioInputTypeEnum type;
     uint32_t buttons_state;
+    BeeperDevice *beeper;
 } VIRTIOInputDevice;
 
 static const uint16_t buttons_list[] = {
     BTN_LEFT, BTN_RIGHT, BTN_MIDDLE
 };
 
-#define SND_BELL		0x01
-#define SND_TONE		0x02
+#define SND_BELL         0x01
+#define SND_TONE         0x02
 
-void beep(int freq);
+#define BELL_FREQ        1000 /* in Hz */
+
+static void virtio_input_handle_status(VIRTIOInputDevice *s1, uint16_t type,
+                                       uint16_t code, uint32_t value)
+{
+    BeeperDevice *bp = s1->beeper;
+
+    if (type != VIRTIO_INPUT_EV_SND || !bp)
+        return;
+    switch(code) {
+    case SND_BELL:
+        bp->set_tone(bp->opaque, value ? BELL_FREQ : 0);
+        break;
+    case SND_TONE:
+        bp->set_tone(bp->opaque, value > 0x7fffffff ? 0x7fffffff : value);
+        break;
+    default:
+        break;
+    }
+}
+
+/* the guest may reset the device without stopping its tone first,
+   e.g. barebox when it boots an OS during a beep */
+static void virtio_input_reset(VIRTIODevice *s)
+{
+    VIRTIOInputDevice *s1 = (VIRTIOInputDevice *)s;
+    BeeperDevice *bp = s1->beeper;
+
+    if (bp)
+        bp->set_tone(bp->opaque, 0);
+}
 
 static int virtio_input_recv_request(VIRTIODevice *s, int queue_idx,
                                       int desc_idx, int read_size,
                                       int write_size)
 {
+    VIRTIOInputDevice *s1 = (VIRTIOInputDevice *)s;
     uint8_t buf[8];
-    uint16_t type, code;
-    uint32_t value;
+    int pos;
 
     if (queue_idx == 1) {
-        /* led & keyboard updates */
+        /* led & sound updates */
         //        printf("%s: write_size=%d\n", __func__, write_size);
-
-	    if (memcpy_from_queue(s, buf, queue_idx, desc_idx, 0, sizeof(buf)) == 0) {
-		    type = get_le16(buf);
-		    code = get_le16(buf + 2);
-		    value = get_le32(buf + 4);
-		    if (type == VIRTIO_INPUT_EV_SND) {
-			    if (code == SND_BELL) {
-				    value = value ? 1000 : 0;
-				    code = SND_TONE;
-			    }
-
-			    if (code == SND_TONE)
-				    beep(value);
-		    }
-	    }
+        for(pos = 0; pos + 8 <= read_size; pos += 8) {
+            if (memcpy_from_queue(s, buf, queue_idx, desc_idx, pos, 8) < 0)
+                break;
+            virtio_input_handle_status(s1, get_le16(buf), get_le16(buf + 2),
+                                       get_le32(buf + 4));
+        }
         virtio_consume_desc(s, queue_idx, desc_idx, 0);
     }
     return 0;
@@ -1588,10 +1614,12 @@ static void virtio_input_config_write(VIRTIODevice *s)
             case VIRTIO_INPUT_EV_REP: /* allow key repetition */
                 config[2] = 1;
                 break;
-	    case VIRTIO_INPUT_EV_SND:
-		config[2] = 1;
-		config[8] = (1 << SND_BELL) | (1 << SND_TONE);
-		break;
+            case VIRTIO_INPUT_EV_SND:
+                if (s1->beeper) {
+                    config[2] = 1;
+                    config[8] = (1 << SND_BELL) | (1 << SND_TONE);
+                }
+                break;
             default:
                 break;
             }
@@ -1658,7 +1686,8 @@ static void virtio_input_config_write(VIRTIODevice *s)
     }
 }
 
-VIRTIODevice *virtio_input_init(VIRTIOBusDef *bus, VirtioInputTypeEnum type)
+VIRTIODevice *virtio_input_init(VIRTIOBusDef *bus, VirtioInputTypeEnum type,
+                                BeeperDevice *beeper)
 {
     VIRTIOInputDevice *s;
 
@@ -1668,7 +1697,10 @@ VIRTIODevice *virtio_input_init(VIRTIOBusDef *bus, VirtioInputTypeEnum type)
     s->common.queue[0].manual_recv = TRUE;
     s->common.device_features = 0;
     s->common.config_write = virtio_input_config_write;
+    s->common.reset = virtio_input_reset;
     s->type = type;
+    if (type == VIRTIO_INPUT_TYPE_KEYBOARD)
+        s->beeper = beeper;
     return (VIRTIODevice *)s;
 }
 

@@ -129,12 +129,20 @@ typedef enum {
 
 #define VIRTIO_INPUT_ABS_SCALE 32768
 
+typedef struct {
+    void *opaque;
+    /* play a tone of freq Hz until the next call, 0 stops it */
+    void (*set_tone)(void *opaque, int freq);
+} BeeperDevice;
+
 int virtio_input_send_key_event(VIRTIODevice *s, BOOL is_down,
                                 uint16_t key_code);
 int virtio_input_send_mouse_event(VIRTIODevice *s, int dx, int dy, int dz,
                                   unsigned int buttons);
 
-VIRTIODevice *virtio_input_init(VIRTIOBusDef *bus, VirtioInputTypeEnum type);
+/* the guest can use the beeper of a keyboard, beeper may be NULL */
+VIRTIODevice *virtio_input_init(VIRTIOBusDef *bus, VirtioInputTypeEnum type,
+                                BeeperDevice *beeper);
 
 /* 9p filesystem device */
 

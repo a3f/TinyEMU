@@ -179,6 +179,11 @@ typedef struct {
 static void init_vm(void *arg);
 static void init_vm_fs(void *arg);
 static void init_vm_drive(void *arg);
+static void js_beeper_set_tone(void *opaque, int beepfreq);
+
+static BeeperDevice js_beeper = {
+    .set_tone = js_beeper_set_tone,
+};
 
 void vm_start(const char *url, int ram_size, const char *cmdline,
               const char *pwd, int width, int height, BOOL has_network)
@@ -253,6 +258,7 @@ static void init_vm(void *arg)
     } else {
         p->console = console_init();
     }
+    p->beeper = &js_beeper;
     
     if (p->eth_count > 0 && !s->has_network) {
         /* remove the interfaces */
@@ -347,7 +353,7 @@ void virt_machine_run(void *opaque)
     }
 }
 
-void beep(int beepfreq)
+static void js_beeper_set_tone(void *opaque, int beepfreq)
 {
 	static int init;
 	if (!init) {
