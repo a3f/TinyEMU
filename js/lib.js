@@ -39,6 +39,7 @@ mergeInto(LibraryManager.library, {
         HEAPU32[ph >> 2] = r[1];
     },
 
+    fs_export_file__deps: ['$UTF8ToString'],
     fs_export_file: function(filename, buf, buf_len)
     {
         var _filename = UTF8ToString(filename);
@@ -58,6 +59,8 @@ mergeInto(LibraryManager.library, {
         }, 50);
     },
 
+    /* the returned handle isn't used, there's no way to abort */
+    emscripten_async_wget3_data__deps: ['$UTF8ToString', 'malloc', 'free'],
     emscripten_async_wget3_data: function(url, request, user, password, post_data, post_data_len, arg, free, onload, onerror, onprogress) {
     var _url = UTF8ToString(url);
     var _request = UTF8ToString(request);
@@ -81,7 +84,7 @@ mergeInto(LibraryManager.library, {
           http.setRequestHeader("Authorization", "Basic " + btoa(_user + ':' + _password));
       }
         
-    var handle = Browser.getNextWgetRequestHandle();
+    var handle = 0;
 
     // LOAD
     http.onload = function http_onload(e) {
@@ -89,30 +92,23 @@ mergeInto(LibraryManager.library, {
         var byteArray = new Uint8Array(http.response);
         var buffer = _malloc(byteArray.length);
         HEAPU8.set(byteArray, buffer);
-        if (onload) dynCall('viiii', onload, [handle, arg, buffer, byteArray.length]);
+        if (onload) {{{ makeDynCall('viiii', 'onload') }}}(handle, arg, buffer, byteArray.length);
         if (free) _free(buffer);
       } else {
-        if (onerror) dynCall('viiii', onerror, [handle, arg, http.status, http.statusText]);
+        if (onerror) {{{ makeDynCall('viiii', 'onerror') }}}(handle, arg, http.status, http.statusText);
       }
-      delete Browser.wgetRequests[handle];
     };
 
     // ERROR
     http.onerror = function http_onerror(e) {
       if (onerror) {
-        dynCall('viiii', onerror, [handle, arg, http.status, http.statusText]);
+        {{{ makeDynCall('viiii', 'onerror') }}}(handle, arg, http.status, http.statusText);
       }
-      delete Browser.wgetRequests[handle];
     };
 
     // PROGRESS
     http.onprogress = function http_onprogress(e) {
-      if (onprogress) dynCall('viiii', onprogress, [handle, arg, e.loaded, e.lengthComputable || e.lengthComputable === undefined ? e.total : 0]);
-    };
-
-    // ABORT
-    http.onabort = function http_onabort(e) {
-      delete Browser.wgetRequests[handle];
+      if (onprogress) {{{ makeDynCall('viiii', 'onprogress') }}}(handle, arg, e.loaded, e.lengthComputable || e.lengthComputable === undefined ? e.total : 0);
     };
 
     // Useful because the browser can limit the number of redirection
@@ -131,8 +127,6 @@ mergeInto(LibraryManager.library, {
     } else {
       http.send(null);
     }
-
-    Browser.wgetRequests[handle] = http;
 
     return handle;
   },
@@ -191,6 +185,7 @@ mergeInto(LibraryManager.library, {
   },
 
   /* file buffer API */
+  file_buffer_get_new_handle__deps: ['$Browser'],
   file_buffer_get_new_handle: function()
   {
       var h;
@@ -217,7 +212,7 @@ mergeInto(LibraryManager.library, {
       HEAPU32[(bs + 4) >> 2] = 0;
   },
 
-  file_buffer_resize__deps: ['file_buffer_get_new_handle'],
+  file_buffer_resize__deps: ['$Browser', 'file_buffer_get_new_handle'],
   file_buffer_resize: function(bs, new_size)
   {
       var h, size, new_data, size1, i, data;
@@ -248,12 +243,14 @@ mergeInto(LibraryManager.library, {
       return 0;
   },
   
+  file_buffer_reset__deps: ['file_buffer_resize', 'file_buffer_init'],
   file_buffer_reset: function(bs)
   {
       _file_buffer_resize(bs, 0);
       _file_buffer_init(bs);
   },
     
+  file_buffer_write__deps: ['$Browser'],
   file_buffer_write: function(bs, offset, buf, size)
   {
       var h, data, i;
@@ -266,6 +263,7 @@ mergeInto(LibraryManager.library, {
       }
   },
     
+  file_buffer_read__deps: ['$Browser'],
   file_buffer_read: function(bs, offset, buf, size)
   {
       var h, data, i;
@@ -278,6 +276,7 @@ mergeInto(LibraryManager.library, {
       }
   },
 
+  file_buffer_set__deps: ['$Browser'],
   file_buffer_set: function(bs, offset, val, size)
   {
       var h, data, i;
