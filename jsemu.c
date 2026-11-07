@@ -307,29 +307,55 @@ static void init_vm(void *arg)
 /* need to be long enough to hide the non zero delay of setTimeout(_, 0) */
 #define MAX_EXEC_TOTAL_CYCLE 3000000
 #define MAX_EXEC_CYCLE        200000
+/* A guest may post a receive buffer for a single byte only (barebox
+   does), so each byte of console input needs a round trip through the
+   guest: typed keys would pile up, and multi-byte sequences (arrow keys,
+   replies of the terminal) arrive slower than the guest waits for them.
+   So the console is fed before each step, and the steps are short while
+   input is pending, but only for up to one normal step after the guest
+   last took some: it may not read the console at all. */
+#define CONSOLE_EXEC_CYCLE     10000
+#define CONSOLE_EXEC_STEPS    (MAX_EXEC_CYCLE / CONSOLE_EXEC_CYCLE)
 
 #define MAX_SLEEP_TIME 10 /* in ms */
+
+static int console_short_steps; /* left before falling back to long steps */
+
+/* Hand queued console input to the guest, as much as it has buffers
+   for. Return TRUE if it took some. */
+static BOOL console_feed(VirtMachine *m)
+{
+    uint8_t buf[128];
+    int ret, len;
+    BOOL fed = FALSE;
+
+    if (!m->console_dev)
+        return FALSE;
+    while (console_fifo_count != 0 &&
+           virtio_console_can_write_data(m->console_dev)) {
+        len = virtio_console_get_write_len(m->console_dev);
+        len = min_int(len, sizeof(buf));
+        ret = m->console->read_data(m->console->opaque, buf, len);
+        if (ret <= 0)
+            break;
+        virtio_console_write_data(m->console_dev, buf, ret);
+        fed = TRUE;
+    }
+    return fed;
+}
 
 void virt_machine_run(void *opaque)
 {
     VirtMachine *m = opaque;
-    int delay, i;
+    int delay, n_cycles, exec_cycles;
     FBDevice *fb_dev;
     
-    if (m->console_dev && virtio_console_can_write_data(m->console_dev)) {
-        uint8_t buf[128];
-        int ret, len;
-        len = virtio_console_get_write_len(m->console_dev);
-        len = min_int(len, sizeof(buf));
-        ret = m->console->read_data(m->console->opaque, buf, len);
-        if (ret > 0)
-            virtio_console_write_data(m->console_dev, buf, ret);
-        if (console_resize_pending) {
-            int w, h;
-            console_get_size(&w, &h);
-            virtio_console_resize_event(m->console_dev, w, h);
-            console_resize_pending = FALSE;
-        }
+    if (console_resize_pending && m->console_dev &&
+        virtio_console_can_write_data(m->console_dev)) {
+        int w, h;
+        console_get_size(&w, &h);
+        virtio_console_resize_event(m->console_dev, w, h);
+        console_resize_pending = FALSE;
     }
 
     fb_dev = m->fb_dev;
@@ -338,14 +364,21 @@ void virt_machine_run(void *opaque)
         fb_dev->refresh(fb_dev, fb_refresh1, NULL);
     }
     
-    i = 0;
+    n_cycles = 0;
     for(;;) {
+        if (console_feed(m))
+            console_short_steps = CONSOLE_EXEC_STEPS;
         /* wait for an event: the only asynchronous event is the RTC timer */
         delay = virt_machine_get_sleep_duration(m, MAX_SLEEP_TIME);
-        if (delay != 0 || i >= MAX_EXEC_TOTAL_CYCLE / MAX_EXEC_CYCLE)
+        if (delay != 0 || n_cycles >= MAX_EXEC_TOTAL_CYCLE)
             break;
-        virt_machine_interp(m, MAX_EXEC_CYCLE);
-        i++;
+        exec_cycles = MAX_EXEC_CYCLE;
+        if (console_fifo_count != 0 && console_short_steps > 0) {
+            exec_cycles = CONSOLE_EXEC_CYCLE;
+            console_short_steps--;
+        }
+        virt_machine_interp(m, exec_cycles);
+        n_cycles += exec_cycles;
     }
     
     if (delay == 0) {
