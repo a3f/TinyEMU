@@ -177,6 +177,19 @@ mergeInto(LibraryManager.library, {
       }
   },
 
+  /* Playing tones is up to the page. If it has a beeper, it must create
+     it before starting the VM. */
+  beeper_present: function()
+  {
+      return typeof beeper != "undefined" && beeper ? 1 : 0;
+  },
+
+  /* tone of freq Hz until the next call, 0 for silence */
+  beeper_set_tone: function(opaque, freq)
+  {
+      beeper.set_tone(freq);
+  },
+
   /* file buffer API */
   file_buffer_get_new_handle: function()
   {

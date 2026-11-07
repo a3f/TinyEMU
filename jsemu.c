@@ -49,6 +49,8 @@ extern void fb_refresh(void *opaque, void *data,
                        int x, int y, int w, int h, int stride);
 extern void net_recv_packet(EthernetDevice *bs,
                             const uint8_t *buf, int len);
+extern int beeper_present(void);
+extern void beeper_set_tone(void *opaque, int freq);
 
 static uint8_t console_fifo[1024];
 static int console_fifo_windex;
@@ -179,10 +181,9 @@ typedef struct {
 static void init_vm(void *arg);
 static void init_vm_fs(void *arg);
 static void init_vm_drive(void *arg);
-static void js_beeper_set_tone(void *opaque, int beepfreq);
 
 static BeeperDevice js_beeper = {
-    .set_tone = js_beeper_set_tone,
+    .set_tone = beeper_set_tone,
 };
 
 void vm_start(const char *url, int ram_size, const char *cmdline,
@@ -258,7 +259,8 @@ static void init_vm(void *arg)
     } else {
         p->console = console_init();
     }
-    p->beeper = &js_beeper;
+    if (beeper_present())
+        p->beeper = &js_beeper;
     
     if (p->eth_count > 0 && !s->has_network) {
         /* remove the interfaces */
@@ -351,42 +353,4 @@ void virt_machine_run(void *opaque)
     } else {
         emscripten_async_call(virt_machine_run, m, MAX_SLEEP_TIME);
     }
-}
-
-static void js_beeper_set_tone(void *opaque, int beepfreq)
-{
-	static int init;
-	if (!init) {
-		EM_ASM({
-			audioCtx = new (window.AudioContext || window.webkitAudioContext || window.audioContext);
-			gainNode = audioCtx.createGain();
-			old_oscillator = null;
-		});
-		init = 1;
-	}
-	EM_ASM({ function beep(freq) {
-		try {
-			if (old_oscillator !== null) {
-				old_oscillator.stop();
-				old_oscillator = null;
-			}
-
-			if (freq) {
-				oscillator = audioCtx.createOscillator();
-				oscillator.connect(gainNode);
-				gainNode.connect(audioCtx.destination);
-				gainNode.gain.value = 0.125;
-				oscillator.type = "square";
-
-				oscillator.frequency.value = freq;
-				oscillator.start();
-				old_oscillator = oscillator;
-			}
-
-		} catch (error) {
-			console.error(error);
-		}
-	}
-	beep($0);
-	}, beepfreq);
 }
